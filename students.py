@@ -1,61 +1,88 @@
-from telegram import KeyboardButton, ReplyKeyboardMarkup
-from telegram.ext import ConversationHandler, CallbackQueryHandler, MessageHandler, filters
+import json
 
-NAME, DESCRIPTION, PHONE = range(3)
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-async def start_create_student(update, context):
-    await update.callback_query.answer()
-    await update.callback_query.edit_message_text("Введите имя ученика:")
-    return NAME
 
-async def get_name(update, context):
-    context.user_data['name'] = update.message.text
-    await update.message.reply_text("Введите краткое описание ученика:")
-    return DESCRIPTION
+def count_today_students(file_path='students.json'):
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            students = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return 0
 
-async def get_description(update, context):
-    context.user_data['description'] = update.message.text
+    return len(students)
 
-    contact_button = KeyboardButton("📱 Отправить номер телефона", request_contact=True)
-    cancel_button = KeyboardButton("❌ Отменить")
+def load_students(file_path='students.json'):
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            students = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
 
-    reply_markup = ReplyKeyboardMarkup([[contact_button], [cancel_button]], resize_keyboard=True, one_time_keyboard=True)
+    return students
 
-    await update.message.reply_text("Пожалуйста, отправьте номер телефона ученика или нажмите ❌ Отменить:", reply_markup=reply_markup)
-    return PHONE
+def load_student_for_list():
+    with open("student_list.json", "r", encoding="utf-8") as file:
+        return json.load(file)
 
-async def get_phone(update, context):
-    if update.message.contact:
-        phone_number = update.message.contact.phone_number
-        context.user_data['phone'] = phone_number
+# Отправка списка учеников
+async def show_students(update, context):
+    students = load_student_for_list()
 
-        name = context.user_data['name']
-        description = context.user_data['description']
+    buttons = [[InlineKeyboardButton("➕ Добавить", callback_data="add_student")]]
 
-        # сбор json
-        student = {
-            "name": name,
-            "description": description,
-            "phone": phone_number,
-        }
+    # Список учеников
+    for idx, student in enumerate(students):
+        buttons.append([InlineKeyboardButton(student["name"], callback_data=f"students_list_{idx}")])
 
-        await update.message.reply_text(
-            f"Ученик создан:\n",
-            f"Имя: {name}\n"
-            f"Описание: {description}\n"
-            f"Телефон: {phone_number}",
+    # Кнопка "Назад"
+    buttons.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_groups_menu")])
+
+    await update.callback_query.message.edit_text(
+        "Список учеников:\nНажмите на ученика чтобы посмотреть или изменить информацию о нем",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+
+async def handle_students_callback(update, context, callback_data):
+    students = load_student_for_list()
+
+    if callback_data.startswith("students_list_"):
+        idx = int(callback_data.split("_")[-1])
+        student = students[idx]
+
+        text = (
+            f"👤 ФИО: {student['name']}\n"
+            f"📱 Телефон: {student.get('phone', 'Не указано')}\n"
+            f"👨‍👩‍👧 Родитель: {student.get('parent', 'Не указано')}"
         )
-        return ConversationHandler.END
-    else:
-        await update.message.reply_text("Пожалуйста, используйте кнопку для отправки номера телефона или нажмите ❌ Отменить.")
-        return PHONE
 
-conv_handler = ConversationHandler(
-    entry_points=[CallbackQueryHandler(start_create_student, pattern='^create_student$')],
-    states={
-        NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
-        DESCRIPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_description)],
-        PHONE: [MessageHandler(filters.CONTACT, get_phone)],
-    },
-    fallbacks=[],
-)
+        buttons = [
+            [InlineKeyboardButton("🔄 Обновить", callback_data=f"students_update_{idx}"),
+             InlineKeyboardButton("🗑️ Удалить", callback_data=f"students_delete_{idx}")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="students_back_to_list")]
+        ]
+
+        await update.callback_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+    elif callback_data == "students_back_to_list":
+        await show_students(update, context)
+
+    elif callback_data.startswith("students_delete_"):
+        idx = int(callback_data.split("_")[-1])
+        deleted_student = students.pop(idx)
+
+        save_students(students)
+
+        await update.callback_query.message.edit_text(
+            f"✅ Ученик {deleted_student['name']} удалён.",
+        )
+        await show_students(update, context)
+
+    elif callback_data.startswith("students_update_"):
+        await update.callback_query.message.edit_text(
+            "Отправьте новое ФИО ученика:"
+        )
+
+def save_students(students):
+    with open("students.json", "w", encoding="utf-8") as file:
+        json.dump(students, file, ensure_ascii=False, indent=2)

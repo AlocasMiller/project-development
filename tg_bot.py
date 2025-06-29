@@ -3,7 +3,7 @@ from datetime import datetime
 from telegram import ReplyKeyboardMarkup, Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
-from today import count_today_students, load_students
+from students import count_today_students, load_students, show_students, handle_students_callback
 from study_plans import show_study_plans, add_study_plan_prompt, handle_text, user_states
 from settings_section import show_settings, handle_document, user_states
 from finance import show_finance_menu, ask_period, handle_text as finance_handle_text, user_states as finance_states, \
@@ -47,6 +47,7 @@ async def show_schedule_buttons(update, context, period="today"):
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    callback_data = query.data
     user_id = query.from_user.id
     await query.answer()
 
@@ -89,7 +90,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "period_week":
         await show_schedule_buttons(update, context, period="week")
 
-
     elif data.startswith("student_"):
         index = int(data.split("_")[1])
         student = students[index]
@@ -126,7 +126,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(buttons),
             parse_mode="HTML"
         )
-
 
     elif data == "cancel":
         await query.answer()
@@ -181,10 +180,24 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await ask_period(update, context, mode="forecast")
 
     elif data in ["period_month", "period_3months", "period_halfyear", "period_year", "period_alltime"]:
-        mode = context.user_data.get("finance_mode")  # Сохраняем заранее выбранный режим (stats или forecast)
+        mode = context.user_data.get("finance_mode")
         await show_statistics(update,"12.12.12", "12.12.12")
     elif data == "period_custom":
         await ask_period(update, context)
+
+    elif data == "students":
+        await show_students(update, context)
+
+    elif callback_data.startswith("students_list_") or callback_data == "students_back_to_list":
+        await handle_students_callback(update, context, callback_data)
+
+    elif data == "groups":
+        await query.answer()
+        await query.message.reply_text("Здесь будет логика для работы с группами.")
+
+    elif data == "parents":
+        await query.answer()
+        await query.message.reply_text("Здесь будет логика для работы с родителями.")
 
 main_keyboard = [
     ['📅 Расписание'],
@@ -225,8 +238,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_settings(update, context)
     elif text == "💸 Финансы":
         await show_finance_menu(update, context)
-    elif text in ['👨‍🎓 Ученики и группы']:
-        await update.message.reply_text(f"Вы нажали: {text}\n(Здесь будет логика для этого раздела)", reply_markup=main_markup)
+    elif text == '👨‍🎓 Ученики и группы':
+        buttons = [
+            [InlineKeyboardButton("👨‍🎓 Ученики", callback_data="students")],
+            [InlineKeyboardButton("👥 Группы", callback_data="groups")],
+            [InlineKeyboardButton("👨‍👩‍👧 Родители", callback_data="parents")],
+            [InlineKeyboardButton("🔙 Главное меню", callback_data="cancel")]
+        ]
+        markup = InlineKeyboardMarkup(buttons)
+        await update.message.reply_text("Выберите раздел:", reply_markup=markup)
     else:
         await update.message.reply_text("Я не понял, выберите действие:", reply_markup=main_markup)
 
